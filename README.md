@@ -4,7 +4,7 @@ A standard **Liferay Workspace for DXP 2026.Q1 LTS** (`dxp-2026.q1.13-lts`) with
 
 The step-by-step guide that creates the AWS side (EC2, ALB, RDS, EFS, ECR, the GitHub OIDC role) lives in [LGSAPAC/lfrgs-sh-aws-ec2-tutorial](https://github.com/LGSAPAC/lfrgs-sh-aws-ec2-tutorial), section 12.
 
-> **Status:** Draft, October 2026. The workspace build is tested locally and in GitHub Actions, together with the `linux/amd64` image build and the Tomcat artifact packaging (see [What was tested](#what-was-tested)). Pushing to ECR and deploying to EC2 are **not yet tested**.
+> **Status:** Draft, October 2026. Tested on 22 October 2026: the workspace build (locally and in GitHub Actions), the `linux/amd64` image, the push to Amazon ECR through GitHub OIDC, and the deploy to a single EC2 instance (Docker runtime) through SSM, with the portlet and both client extensions deployed. The Tomcat runtime's deploy and the high-availability rollout are not yet tested (see [What was tested](#what-was-tested)).
 
 ## What's inside
 
@@ -124,12 +124,13 @@ terraform -chdir=terraform output -raw github_variables_commands
 | `LIFERAY_STACK` | `stack_name` |
 | `LIFERAY_RUNTIME` | `docker` or `tomcat`, the same as `liferay_runtime` in Terraform |
 
-Then create the environment **`ec2`** under **Settings → Environments**, with required reviewers and the `main` branch only.
+Then create the environment **`ec2`** under **Settings → Environments**, limited to the `main` branch and `v*` tags (the tutorial, section 12.2, has the CLI commands). **Required reviewers** (an approval before each deployment) need GitHub Team or Enterprise for a private repository; on GitHub Free GitHub refuses them, and every push to `main` deploys straight away. Commits whose message contains `[skip ci]` don't run the workflow, which is handy for documentation-only changes.
 
 Until the AWS variables are set, the workflow still builds and checks everything and says so in a notice; nothing is pushed or deployed.
 
 ### Notes
 
+- **Immutable OIDC subject:** if `gh api repos/<org>/<repo>/actions/oidc/customization/sub` shows `"use_immutable_subject":true`, the token's subject is `repo:<org>@<id>/<repo>@<id>:...`. Set that prefix as `github_oidc_subject_prefix` in the tutorial's Terraform, or the `image` job fails with `Not authorized to perform sts:AssumeRoleWithWebIdentity`. This repository uses it.
 - **Trust policy:** the AWS role accepts this repository's `main` branch, `v*` tags and the `ec2` environment only. Using a fork or a renamed repository? Set `github_repository` in the tutorial's `terraform.tfvars` and apply again.
 - **Rollback (Docker):** a node that does not become ready goes back to its previous image by itself, and the rollout stops. To return to an older build, re-run that run's `deploy` job.
 - **Rollback (Tomcat):** re-run the older run's `deploy` job; its archive stays in S3 for 90 days.
@@ -154,8 +155,9 @@ Until the AWS variables are set, the workflow still builds and checks everything
 | GitHub Actions `build` job | ✅ Passed in 1 min 20 s ([run 39708712711](https://github.com/LGSAPAC/lfrgs-sh-aws-ec2-sample-workspace/actions/runs/39708712711)): jar, zip and `Dockerfile.ext` checks; `liferay-artifacts-main-232a113.tar.gz` with `deploy/` (jar, zip) and `configs/` (`portal-workspace.properties`, `portal-setup-wizard.properties`) |
 | GitHub Actions `image` job (`linux/amd64`, no AWS settings) | ✅ Passed in 2 min 33 s: `dxp-custom:main-232a113`, amd64, about 3.1 GB, jar in `/mnt/liferay/deploy`, zip in `/home/liferay/osgi/client-extensions`, `/home/liferay/configs/ec2` present; not pushed, as expected |
 | GitHub Actions `deploy` job | ✅ Skipped, as expected without `LIFERAY_STACK` |
-| Push to ECR (OIDC) | 🔎 Not yet tested (no AWS stack yet) |
-| Deploy to EC2 through SSM (Docker and Tomcat runtimes) | 🔎 Not yet tested |
+| Push to ECR (OIDC) | ✅ `dxp-custom:main-9b4d5a8`, 2.0 GB compressed ([run 39725947441](https://github.com/LGSAPAC/lfrgs-sh-aws-ec2-sample-workspace/actions/runs/39725947441), second attempt, after setting the immutable OIDC subject prefix) |
+| Deploy to EC2 through SSM, Docker runtime, single instance | ✅ Same run: `Deployed ...dxp-custom:main-9b4d5a8`, `Final status: Success`, deploy job 2 minutes. Both client extensions `STARTED`; the portlet deployed once the tutorial mounted its files at `/mnt/liferay/files` (tutorial section 7) |
+| Deploy through SSM, Tomcat runtime, and HA rollout | 🔎 Not yet tested |
 | Sample portlet visible, CSS client extension applied, React widget renders in DXP | 🔎 Not yet tested |
 
 `dxp-2026.q1.13-lts` was the latest **promoted** 2026.Q1 release in Liferay's release feed (<https://releases.liferay.com/releases.json>) on 22 October 2026.
