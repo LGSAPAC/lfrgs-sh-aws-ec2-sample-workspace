@@ -4,7 +4,7 @@ A standard **Liferay Workspace for DXP 2026.Q1 LTS** (`dxp-2026.q1.13-lts`) with
 
 The step-by-step guide that creates the AWS side (EC2, ALB, RDS, EFS, ECR, the GitHub OIDC role) lives in [LGSAPAC/lfrgs-sh-aws-ec2-tutorial](https://github.com/LGSAPAC/lfrgs-sh-aws-ec2-tutorial), section 12.
 
-> **Status:** Draft, October 2026. Tested on 22 October 2026: the workspace build (locally and in GitHub Actions), the `linux/amd64` image, the push to Amazon ECR through GitHub OIDC, and the deploy to a single EC2 instance (Docker runtime) through SSM, with the portlet and both client extensions deployed. The Tomcat runtime's deploy and the high-availability rollout are not yet tested (see [What was tested](#what-was-tested)).
+> **Status:** Draft, October 2026. Tested on 22 October 2026: the workspace build (locally and in GitHub Actions), the `linux/amd64` image, the push to Amazon ECR through GitHub OIDC, and the deploy to a single EC2 instance (Docker runtime) through SSM, with the portlet and both client extensions deployed. The rolling deploy across two clustered nodes is tested too; the Tomcat runtime's deploy is not yet tested (see [What was tested](#what-was-tested)).
 
 ## What's inside
 
@@ -160,7 +160,8 @@ Until the AWS variables are set, the workflow still builds and checks everything
 | Deploy to EC2 through SSM, Docker runtime, single instance | ✅ Same run: `Deployed ...dxp-custom:main-9b4d5a8`, `Final status: Success`, deploy job 2 minutes. Both client extensions `STARTED`; the portlet deployed once the tutorial mounted its files at `/mnt/liferay/files` (tutorial section 7) |
 | Deploy on demand | ✅ Push to `main`: image `main-1041124` built and pushed, `deploy` skipped, Liferay untouched ([run 39729765649](https://github.com/LGSAPAC/lfrgs-sh-aws-ec2-sample-workspace/actions/runs/39729765649)). **Run workflow** with **Deploy**: rolled out `main-1041124`, all node checks pass ([run 39730255875](https://github.com/LGSAPAC/lfrgs-sh-aws-ec2-sample-workspace/actions/runs/39730255875)) |
 | Deploy from a pushed `v*` tag | 🔎 Not yet tested |
-| Deploy through SSM, Tomcat runtime, and HA rollout | 🔎 Not yet tested |
+| Rolling deploy through SSM in high availability (2 nodes, Docker runtime) | ✅ Each node taken out of the load balancer, updated and put back, one at a time ([run 39799656603](https://github.com/LGSAPAC/lfrgs-sh-aws-ec2-sample-workspace/actions/runs/39799656603), deploy 5 minutes). A probe every 2 seconds got no 502s and 3 timeouts in one 15-second window (tutorial, section 12) |
+| Deploy through SSM, Tomcat runtime | 🔎 Not yet tested |
 | Sample portlet visible, CSS client extension applied, React widget renders in DXP | ✅ All three on a page, through the load balancer: the portlet's message, the orange top border, and the React app greeting the signed-in user from the headless API |
 
 `dxp-2026.q1.13-lts` was the latest **promoted** 2026.Q1 release in Liferay's release feed (<https://releases.liferay.com/releases.json>) on 22 October 2026.
