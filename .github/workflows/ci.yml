@@ -1,0 +1,245 @@
+# Builds the workspace, packages it for both Liferay runtimes on Amazon EC2, and deploys it.
+#
+# - Every push and pull request: Gradle build, stage build/docker, package the Tomcat artifacts.
+# - Pushes to main, v* tags and manual runs: build the linux/amd64 image and check its contents.
+#   With the AWS settings below, the image is pushed to Amazon ECR.
+# - Pushes to main and manual runs, with the AWS settings below: roll the build out to the
+#   Liferay EC2 instances through AWS Systems Manager (SSM), one instance at a time.
+#
+# No AWS keys are stored in GitHub: the workflow assumes an IAM role through GitHub OIDC.
+# The tutorial's Terraform creates the role and prints every value below (terraform output).
+#
+# Repository variables (Settings > Secrets and variables > Actions > Variables):
+#   AWS_REGION        for example ap-southeast-1
+#   AWS_ROLE_ARN      IAM role GitHub Actions assumes (output github_actions_role_arn)
+#   ECR_REPOSITORY    ECR repository URI (output ecr_repository_url)
+#   ARTIFACT_BUCKET   S3 bucket for Tomcat artifacts (output artifact_bucket)
+#   LIFERAY_STACK     stack name the instances are tagged with (output stack_name)
+#   LIFERAY_RUNTIME   docker (default) or tomcat: how Liferay runs on the instances
+#
+# The deploy job runs in the GitHub environment "ec2". Add required reviewers to it to approve
+# each deployment (Settings > Environments > ec2).
+
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: Deploy to the EC2 instances after the build
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  AWS_CONFIGURED: ${{ vars.AWS_REGION != '' && vars.AWS_ROLE_ARN != '' }}
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: gradle/actions/setup-gradle@v6
+
+      - name: Work out the build tag
+        id: meta
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            TAG="${GITHUB_REF_NAME#v}"
+          else
+            TAG="${GITHUB_REF_NAME//\//-}-${GITHUB_SHA::7}"
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "Build tag: ${TAG}"
+
+      - name: Build modules and client extensions, stage the Docker context
+        run: ./gradlew build dockerDeploy createDockerfile --console=plain
+
+      - name: Check the Docker context contains the build output
+        run: |
+          ls -l build/docker/deploy build/docker/client-extensions
+          compgen -G "build/docker/deploy/*.jar" > /dev/null || { echo "::error::No module jars in build/docker/deploy"; exit 1; }
+          compgen -G "build/docker/client-extensions/*.zip" > /dev/null || { echo "::error::No client extension zips in build/docker/client-extensions"; exit 1; }
+          grep -q 'LIFERAY_WORKSPACE_ENVIRONMENT=ec2' build/docker/Dockerfile || { echo "::error::Dockerfile.ext was not applied"; exit 1; }
+          cat build/docker/Dockerfile
+
+      # Tar the context so file permissions and hidden files survive the artifact upload unchanged.
+      - name: Package the Docker context
+        run: tar -C build -cf docker-context.tar docker
+
+      # Same build output for the Tomcat runtime: deploy/ goes to $LIFERAY_HOME/deploy (hot deploy)
+      # and configs/ is configs/common merged with configs/ec2, copied into $LIFERAY_HOME.
+      - name: Package the Tomcat artifacts
+        run: |
+          STAGE="$(mktemp -d)"
+          mkdir -p "${STAGE}/deploy" "${STAGE}/configs"
+          cp build/docker/deploy/*.jar build/docker/client-extensions/*.zip "${STAGE}/deploy/"
+          cp -R build/docker/configs/ec2/. "${STAGE}/configs/"
+          find "${STAGE}" -name .touch -delete
+          echo "${{ steps.meta.outputs.tag }}" > "${STAGE}/BUILD_TAG"
+          tar -C "${STAGE}" -czf "liferay-artifacts-${{ steps.meta.outputs.tag }}.tar.gz" .
+          tar -tzvf "liferay-artifacts-${{ steps.meta.outputs.tag }}.tar.gz"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: docker-context
+          path: docker-context.tar
+          retention-days: 7
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: tomcat-artifacts
+          path: liferay-artifacts-*.tar.gz
+          retention-days: 30
+
+  image:
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+      pushed: ${{ steps.meta.outputs.push }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: docker-context
+
+      - name: Unpack the Docker context
+        run: mkdir -p build && tar -C build -xf docker-context.tar && ls -l build/docker
+
+      - name: Work out the image name
+        id: meta
+        env:
+          ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+          TAG: ${{ needs.build.outputs.tag }}
+        run: |
+          if [ "${AWS_CONFIGURED}" = "true" ] && [ -n "${ECR_REPOSITORY}" ]; then
+            IMAGE="${ECR_REPOSITORY}:${TAG}"
+            echo "push=true" >> "$GITHUB_OUTPUT"
+          else
+            IMAGE="dxp-custom:${TAG}"
+            echo "push=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::AWS_REGION, AWS_ROLE_ARN or ECR_REPOSITORY not set: the image is built and checked but not pushed."
+          fi
+          echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
+          echo "Image: ${IMAGE}"
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build the linux/amd64 image
+        uses: docker/build-push-action@v7
+        with:
+          context: build/docker
+          platforms: linux/amd64
+          tags: ${{ steps.meta.outputs.image }}
+          load: true
+
+      - name: Check the image contains the build output
+        env:
+          IMAGE: ${{ steps.meta.outputs.image }}
+        run: |
+          docker image inspect "${IMAGE}" --format 'Architecture: {{.Architecture}}  Size: {{.Size}}'
+          [ "$(docker image inspect "${IMAGE}" --format '{{.Architecture}}')" = "amd64" ] || { echo "::error::Image is not amd64"; exit 1; }
+          docker run --rm --entrypoint ls "${IMAGE}" -l /mnt/liferay/deploy /home/liferay/osgi/client-extensions /home/liferay/configs/ec2
+
+      - name: Sign in to AWS
+        if: steps.meta.outputs.push == 'true'
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-region: ${{ vars.AWS_REGION }}
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          role-session-name: gha-image-${{ github.run_id }}
+
+      - name: Sign in to Amazon ECR
+        if: steps.meta.outputs.push == 'true'
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Push the image to Amazon ECR
+        if: steps.meta.outputs.push == 'true'
+        env:
+          IMAGE: ${{ steps.meta.outputs.image }}
+        run: |
+          docker push "${IMAGE}"
+          echo "### Pushed \`${IMAGE}\`" >> "$GITHUB_STEP_SUMMARY"
+
+  deploy:
+    needs: [build, image]
+    if: >-
+      vars.LIFERAY_STACK != '' &&
+      (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) &&
+      (github.event_name == 'push' || inputs.deploy)
+    runs-on: ubuntu-24.04
+    environment: ec2
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      LIFERAY_STACK: ${{ vars.LIFERAY_STACK }}
+      LIFERAY_RUNTIME: ${{ vars.LIFERAY_RUNTIME || 'docker' }}
+      ARTIFACT_BUCKET: ${{ vars.ARTIFACT_BUCKET }}
+      IMAGE: ${{ needs.image.outputs.image }}
+      TAG: ${{ needs.build.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check the settings
+        run: |
+          [ "${AWS_CONFIGURED}" = "true" ] || { echo "::error::Set AWS_REGION and AWS_ROLE_ARN to deploy"; exit 1; }
+          case "${LIFERAY_RUNTIME}" in
+            docker) [ "${{ needs.image.outputs.pushed }}" = "true" ] || { echo "::error::The image was not pushed to ECR; set ECR_REPOSITORY"; exit 1; } ;;
+            tomcat) [ -n "${ARTIFACT_BUCKET}" ] || { echo "::error::Set ARTIFACT_BUCKET for the tomcat runtime"; exit 1; } ;;
+            *) echo "::error::LIFERAY_RUNTIME must be docker or tomcat, not ${LIFERAY_RUNTIME}"; exit 1 ;;
+          esac
+
+      - name: Sign in to AWS
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-region: ${{ vars.AWS_REGION }}
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          role-session-name: gha-deploy-${{ github.run_id }}
+
+      - uses: actions/download-artifact@v8
+        if: env.LIFERAY_RUNTIME == 'tomcat'
+        with:
+          name: tomcat-artifacts
+
+      - name: Upload the Tomcat artifacts to S3
+        if: env.LIFERAY_RUNTIME == 'tomcat'
+        run: aws s3 cp "liferay-artifacts-${TAG}.tar.gz" "s3://${ARTIFACT_BUCKET}/builds/liferay-artifacts-${TAG}.tar.gz"
+
+      - name: Roll out to the Liferay instances, one at a time
+        run: |
+          if [ "${LIFERAY_RUNTIME}" = "docker" ]; then
+            COMMAND="/opt/liferay-ec2/scripts/deploy-docker.sh ${IMAGE}"
+          else
+            COMMAND="/opt/liferay-ec2/scripts/deploy-tomcat.sh s3://${ARTIFACT_BUCKET}/builds/liferay-artifacts-${TAG}.tar.gz"
+          fi
+          .github/scripts/ssm-run.sh "${LIFERAY_STACK}" "${COMMAND}"
+
+      - name: Summary
+        run: |
+          {
+            echo "### Deployed \`${TAG}\` to stack \`${LIFERAY_STACK}\` (${LIFERAY_RUNTIME})"
+            [ "${LIFERAY_RUNTIME}" = "docker" ] && echo "Image: \`${IMAGE}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

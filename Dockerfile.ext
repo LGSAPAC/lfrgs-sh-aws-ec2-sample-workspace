@@ -1,0 +1,4 @@
+# Any instructions here will be appended to the end of the Dockerfile created by `createDockerfile`.
+
+# Use configs/ec2 (merged with configs/common) on EC2 instead of configs/local, which turns on developer mode.
+ENV LIFERAY_WORKSPACE_ENVIRONMENT=ec2

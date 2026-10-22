@@ -1,0 +1,5 @@
+/* Sample global CSS client extension for Liferay self-hosted on Amazon EC2.
+   Add it to a page (Design > CSS Client Extensions) and the page gets an orange top border. */
+body {
+	border-top: 4px solid #ff9900;
+}

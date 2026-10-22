@@ -1,0 +1,7 @@
+Bundle-Name: ec2-sample-portlet
+Bundle-SymbolicName: com.liferay.ec2.sample.portlet
+Bundle-Version: 1.0.0
+Export-Package: com.liferay.ec2.sample.portlet.constants
+Provide-Capability:\
+	liferay.language.resources;\
+		resource.bundle.base.name="content.Language"
