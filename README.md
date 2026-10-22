@@ -116,8 +116,9 @@ Until the AWS variables are set, the workflow still builds and checks everything
 | --- | --- |
 | `./gradlew build` | ✅ Module jar and client extension zip built |
 | `./gradlew clean dockerDeploy createDockerfile` | ✅ Both artifacts staged in `build/docker/`; Dockerfile includes `LIFERAY_WORKSPACE_ENVIRONMENT=ec2` |
-| GitHub Actions `build` job | 🔎 Pending first run |
-| GitHub Actions `image` job (`linux/amd64`, no AWS settings) | 🔎 Pending first run |
+| GitHub Actions `build` job | ✅ Passed in 1 min 20 s ([run 39708712711](https://github.com/LGSAPAC/lfrgs-sh-aws-ec2-sample-workspace/actions/runs/39708712711)): jar, zip and `Dockerfile.ext` checks; `liferay-artifacts-main-232a113.tar.gz` with `deploy/` (jar, zip) and `configs/` (`portal-workspace.properties`, `portal-setup-wizard.properties`) |
+| GitHub Actions `image` job (`linux/amd64`, no AWS settings) | ✅ Passed in 2 min 33 s: `dxp-custom:main-232a113`, amd64, about 3.1 GB, jar in `/mnt/liferay/deploy`, zip in `/home/liferay/osgi/client-extensions`, `/home/liferay/configs/ec2` present; not pushed, as expected |
+| GitHub Actions `deploy` job | ✅ Skipped, as expected without `LIFERAY_STACK` |
 | Push to ECR (OIDC) | 🔎 Not yet tested (no AWS stack yet) |
 | Deploy to EC2 through SSM (Docker and Tomcat runtimes) | 🔎 Not yet tested |
 | Sample portlet visible and CSS client extension applied in DXP | 🔎 Not yet tested |
