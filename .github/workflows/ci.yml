@@ -78,6 +78,12 @@ jobs:
           ls -l build/docker/deploy build/docker/client-extensions
           compgen -G "build/docker/deploy/*.jar" > /dev/null || { echo "::error::No module jars in build/docker/deploy"; exit 1; }
           compgen -G "build/docker/client-extensions/*.zip" > /dev/null || { echo "::error::No client extension zips in build/docker/client-extensions"; exit 1; }
+          # Every client extension project must produce its zip (a failed frontend build can leave one out).
+          for YAML in client-extensions/*/client-extension.yaml; do
+            NAME="$(basename "$(dirname "${YAML}")")"
+            [ -f "build/docker/client-extensions/${NAME}.zip" ] || { echo "::error::Missing build/docker/client-extensions/${NAME}.zip"; exit 1; }
+            echo "Client extension zip: ${NAME}.zip"
+          done
           grep -q 'LIFERAY_WORKSPACE_ENVIRONMENT=ec2' build/docker/Dockerfile || { echo "::error::Dockerfile.ext was not applied"; exit 1; }
           cat build/docker/Dockerfile
 

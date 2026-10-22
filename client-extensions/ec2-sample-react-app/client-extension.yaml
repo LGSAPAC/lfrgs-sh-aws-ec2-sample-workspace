@@ -1,0 +1,15 @@
+assemble:
+    - from: build/vite
+      into: static
+ec2-sample-react-app:
+    cssURLs:
+        - "**/index*.css"
+    friendlyURLMapping: ec2-sample-react-app
+    htmlElementName: ec2-sample-react-app
+    instanceable: false
+    name: EC2 Sample React App
+    portletCategoryName: category.client-extensions
+    type: customElement
+    urls:
+        - main.js
+    useESM: true

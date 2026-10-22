@@ -1,0 +1,13 @@
+/* Scoped to the custom element so it never overrides the theme. */
+ec2-sample-react-app .ec2-sample-react-app {
+	border-left: 4px solid #ff9900;
+	padding: 1rem 1.25rem;
+}
+
+ec2-sample-react-app .ec2-sample-react-app__title {
+	margin-top: 0;
+}
+
+ec2-sample-react-app .ec2-sample-react-app__account {
+	font-style: italic;
+}
