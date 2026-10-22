@@ -3,8 +3,10 @@
 # - Every push and pull request: Gradle build, stage build/docker, package the Tomcat artifacts.
 # - Pushes to main, v* tags and manual runs: build the linux/amd64 image and check its contents.
 #   With the AWS settings below, the image is pushed to Amazon ECR.
-# - Pushes to main and manual runs, with the AWS settings below: roll the build out to the
-#   Liferay EC2 instances through AWS Systems Manager (SSM), one instance at a time.
+# - Deploys only on demand, with the AWS settings below: a manual run (Actions > CI/CD >
+#   Run workflow, on main or a v* tag) or a pushed v* tag rolls the build out to the Liferay
+#   EC2 instances through AWS Systems Manager (SSM), one instance at a time. Pushes to main
+#   build and push the image but don't deploy, so merging never restarts Liferay by itself.
 #
 # No AWS keys are stored in GitHub: the workflow assumes an IAM role through GitHub OIDC.
 # The tutorial's Terraform creates the role and prints every value below (terraform output).
@@ -17,8 +19,8 @@
 #   LIFERAY_STACK     stack name the instances are tagged with (output stack_name)
 #   LIFERAY_RUNTIME   docker (default) or tomcat: how Liferay runs on the instances
 #
-# The deploy job runs in the GitHub environment "ec2". Add required reviewers to it to approve
-# each deployment (Settings > Environments > ec2).
+# The deploy job runs in the GitHub environment "ec2". On GitHub Team or Enterprise, add
+# required reviewers to it to approve each deployment (Settings > Environments > ec2).
 
 name: CI/CD
 
@@ -30,7 +32,7 @@ on:
   workflow_dispatch:
     inputs:
       deploy:
-        description: Deploy to the EC2 instances after the build
+        description: Deploy to the EC2 instances after the build (from main or a v* tag)
         type: boolean
         default: true
 
@@ -191,10 +193,12 @@ jobs:
 
   deploy:
     needs: [build, image]
+    # On demand only: a manual run with "Deploy" ticked, or a pushed v* tag. Never a push to main.
     if: >-
       vars.LIFERAY_STACK != '' &&
       (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) &&
-      (github.event_name == 'push' || inputs.deploy)
+      ((github.event_name == 'workflow_dispatch' && inputs.deploy) ||
+       (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')))
     runs-on: ubuntu-24.04
     environment: ec2
     permissions:

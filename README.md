@@ -103,7 +103,7 @@ To work on the app with hot reload, run `npm install && npm run dev` in its fold
 | --- | --- | --- |
 | `build` | Every push and pull request | JDK 21, `./gradlew build dockerDeploy createDockerfile` (including the React build); fails if `build/docker` has no jars, if any client extension project is missing its zip, or if `Dockerfile.ext` was not applied; uploads the Docker context and `liferay-artifacts-<tag>.tar.gz` |
 | `image` | Pushes to `main`, `v*` tags, manual runs | Builds the `linux/amd64` image, checks it is amd64 and contains the jars, zips and `configs/ec2`, then pushes to ECR **only if** the AWS variables below exist |
-| `deploy` | Pushes to `main`, `v*` tags and manual runs (untick **Deploy** to skip), **only if** `LIFERAY_STACK` is set | In the GitHub environment `ec2` (add required reviewers to approve each deploy): signs in to AWS with OIDC and runs `deploy-docker.sh <image>` or `deploy-tomcat.sh <s3-archive>` on every Liferay instance through SSM, **one instance at a time**, stopping at the first failure |
+| `deploy` | **On demand only**, and only if `LIFERAY_STACK` is set: a manual run (**Actions → CI/CD → Run workflow** on `main` or a `v*` tag, with **Deploy** ticked) or a pushed `v*` tag. Never a push to `main` | In the GitHub environment `ec2` (on Team or Enterprise, add required reviewers to approve each deploy): signs in to AWS with OIDC and runs `deploy-docker.sh <image>` or `deploy-tomcat.sh <s3-archive>` on every Liferay instance through SSM, **one instance at a time**, stopping at the first failure |
 
 **Build tags:** a `v1.2.0` git tag gives `1.2.0`; anything else gives `<branch>-<short-sha>`, for example `main-1a2b3c4`.
 
@@ -124,7 +124,7 @@ terraform -chdir=terraform output -raw github_variables_commands
 | `LIFERAY_STACK` | `stack_name` |
 | `LIFERAY_RUNTIME` | `docker` or `tomcat`, the same as `liferay_runtime` in Terraform |
 
-Then create the environment **`ec2`** under **Settings → Environments**, limited to the `main` branch and `v*` tags (the tutorial, section 12.2, has the CLI commands). **Required reviewers** (an approval before each deployment) need GitHub Team or Enterprise for a private repository; on GitHub Free GitHub refuses them, and every push to `main` deploys straight away. Commits whose message contains `[skip ci]` don't run the workflow, which is handy for documentation-only changes.
+Then create the environment **`ec2`** under **Settings → Environments**, limited to the `main` branch and `v*` tags (the tutorial, section 12.2, has the CLI commands). **Required reviewers** (an approval before each deployment) need GitHub Team or Enterprise for a private repository; on GitHub Free GitHub refuses them. That's why deploys here are **on demand only**: a push to `main` builds and pushes the image, but nothing reaches the instances until someone with write access runs the workflow or pushes a `v*` tag. Commits whose message contains `[skip ci]` don't run the workflow at all.
 
 Until the AWS variables are set, the workflow still builds and checks everything and says so in a notice; nothing is pushed or deployed.
 
@@ -132,7 +132,8 @@ Until the AWS variables are set, the workflow still builds and checks everything
 
 - **Immutable OIDC subject:** if `gh api repos/<org>/<repo>/actions/oidc/customization/sub` shows `"use_immutable_subject":true`, the token's subject is `repo:<org>@<id>/<repo>@<id>:...`. Set that prefix as `github_oidc_subject_prefix` in the tutorial's Terraform, or the `image` job fails with `Not authorized to perform sts:AssumeRoleWithWebIdentity`. This repository uses it.
 - **Trust policy:** the AWS role accepts this repository's `main` branch, `v*` tags and the `ec2` environment only. Using a fork or a renamed repository? Set `github_repository` in the tutorial's `terraform.tfvars` and apply again.
-- **Rollback (Docker):** a node that does not become ready goes back to its previous image by itself, and the rollout stops. To return to an older build, re-run that run's `deploy` job.
+- **Release flow:** merge to `main` (image built and pushed), check it, then deploy with **Run workflow**, or tag a release: `git tag v1.0.0 && git push origin v1.0.0` builds image `1.0.0` and deploys it.
+- **Rollback (Docker):** a node that does not become ready goes back to its previous image by itself, and the rollout stops. To return to an older build, **Run workflow** on its `v*` tag, or re-run that run's `deploy` job.
 - **Rollback (Tomcat):** re-run the older run's `deploy` job; its archive stays in S3 for 90 days.
 - **Sessions:** Liferay does not replicate HTTP sessions. Users on the node being deployed are moved to another node and may need to sign in again.
 - **Workflow changes need the `workflow` scope:** pushing changes to `.github/workflows/` with the GitHub CLI fails with "refusing to allow an OAuth App to create or update workflow" until you run `gh auth refresh -h github.com -s workflow`.
