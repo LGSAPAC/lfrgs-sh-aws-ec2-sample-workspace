@@ -158,6 +158,6 @@ Until the AWS variables are set, the workflow still builds and checks everything
 | Push to ECR (OIDC) | ✅ `dxp-custom:main-9b4d5a8`, 2.0 GB compressed ([run 39725947441](https://github.com/LGSAPAC/lfrgs-sh-aws-ec2-sample-workspace/actions/runs/39725947441), second attempt, after setting the immutable OIDC subject prefix) |
 | Deploy to EC2 through SSM, Docker runtime, single instance | ✅ Same run: `Deployed ...dxp-custom:main-9b4d5a8`, `Final status: Success`, deploy job 2 minutes. Both client extensions `STARTED`; the portlet deployed once the tutorial mounted its files at `/mnt/liferay/files` (tutorial section 7) |
 | Deploy through SSM, Tomcat runtime, and HA rollout | 🔎 Not yet tested |
-| Sample portlet visible, CSS client extension applied, React widget renders in DXP | 🔎 Not yet tested |
+| Sample portlet visible, CSS client extension applied, React widget renders in DXP | ✅ All three on a page, through the load balancer: the portlet's message, the orange top border, and the React app greeting the signed-in user from the headless API |
 
 `dxp-2026.q1.13-lts` was the latest **promoted** 2026.Q1 release in Liferay's release feed (<https://releases.liferay.com/releases.json>) on 22 October 2026.
