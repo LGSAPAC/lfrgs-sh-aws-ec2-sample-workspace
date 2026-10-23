@@ -1,6 +1,6 @@
 # Liferay Self-Hosted on Amazon EC2: sample workspace
 
-A standard **Liferay Workspace for DXP 2026.Q1 LTS** (`dxp-2026.q1.13-lts`) with three samples, an OSGi module, a CSS client extension and a **React** client extension, and GitHub Actions that build it and deploy it to Liferay running on Amazon EC2, either as a **Docker container** or as a **Tomcat bundle**, on a **single instance** or a **high-availability** cluster.
+A standard **Liferay Workspace for DXP 2026.Q3** (`dxp-2026.q3.8`) with three samples, an OSGi module, a CSS client extension and a **React** client extension, and GitHub Actions that build it and deploy it to Liferay running on Amazon EC2, either as a **Docker container** or as a **Tomcat bundle**, on a **single instance** or a **high-availability** cluster.
 
 The step-by-step guide that creates the AWS side (EC2, ALB, RDS, EFS, ECR, the GitHub OIDC role) lives in [LGSAPAC/lfrgs-sh-aws-ec2-tutorial](https://github.com/LGSAPAC/lfrgs-sh-aws-ec2-tutorial), section 12.
 
@@ -10,13 +10,13 @@ The step-by-step guide that creates the AWS side (EC2, ALB, RDS, EFS, ECR, the G
 
 | Path | What it is |
 | --- | --- |
-| `gradle.properties` | `liferay.workspace.product=dxp-2026.q1.13-lts`: pins the DXP version, the API BOM and the base Docker image. Also selects Node.js 22 and npm for the React build ([React client extension](#react-client-extension)) |
+| `gradle.properties` | `liferay.workspace.product=dxp-2026.q3.8`: pins the DXP version, the API BOM and the base Docker image (for the LTS line, use `dxp-2026.q1.13-lts`, and set the same release as `liferay_version` in the tutorial's Terraform). Also selects Node.js 22 and npm for the React build ([React client extension](#react-client-extension)) |
 | `settings.gradle` | Liferay Workspace Gradle plugin |
 | `modules/ec2-sample-portlet` | Sample OSGi module (MVC portlet, Jakarta APIs). Shows a message and **the node that served the page**, so you can see the build arrived on every node |
 | `client-extensions/ec2-sample-global-css` | Sample frontend client extension (global CSS) that adds an orange top border to pages it is assigned to |
 | `client-extensions/ec2-sample-react-app` | Sample **React** app as a custom element client extension, built with Vite. A widget that greets the signed-in user by calling Liferay's headless API (`/o/headless-admin-user/v1.0/my-user-account`) through `Liferay.Util.fetch` ([React client extension](#react-client-extension)) |
 | `configs/ec2/portal-workspace.properties` | Settings shared by every EC2 node (`web.server.display.node=true`). Included by the `portal-ext.properties` the tutorial renders on each instance |
-| `configs/common`, `configs/local`, `configs/docker` | Standard workspace environments (`common` is merged into every environment) |
+| `configs/common`, `configs/local`, `configs/docker` | Standard workspace environments (`common` is merged into every environment). `configs/local` turns on Liferay's MCP server for local development ([MCP server](#mcp-server)) |
 | `Dockerfile.ext` | Appended to the generated Dockerfile: selects the `ec2` configs instead of `local` (developer mode) |
 | `.github/workflows/ci.yml` | GitHub Actions: build, image, push to ECR, deploy to EC2 ([CI/CD with GitHub Actions](#cicd-with-github-actions)) |
 | `.github/scripts/ssm-run.sh` | Runs the deploy script on the stack's Liferay instances through AWS Systems Manager, one at a time |
@@ -27,7 +27,7 @@ The step-by-step guide that creates the AWS side (EC2, ALB, RDS, EFS, ECR, the G
 
 | Tool | Version | Notes |
 | --- | --- | --- |
-| JDK | 21 | DXP 2026.Q1 is a Jakarta EE release; tested with Oracle JDK 21.0.12 |
+| JDK | 21 | DXP 2026 releases are Jakarta EE; tested with Oracle JDK 21.0.12 |
 | Gradle | not needed | Use the included wrapper (`./gradlew`, Gradle 8.9) |
 | Docker with buildx | optional | Only to build the image locally; GitHub Actions builds it for you |
 | Node.js | not needed | The workspace downloads Node.js 22 into `build/node` for the React build |
@@ -45,7 +45,7 @@ The step-by-step guide that creates the AWS side (EC2, ALB, RDS, EFS, ECR, the G
 | CSS client extension | `client-extensions/ec2-sample-global-css/dist/ec2-sample-global-css.zip` |
 | React client extension | `client-extensions/ec2-sample-react-app/dist/ec2-sample-react-app.zip` (Vite output in `static/`: `main.js`, `assets/index.css`) |
 
-The first build downloads Gradle, the DXP 2026.Q1 dependencies, Node.js and the React app's npm packages (about 1 minute); later builds are faster.
+The first build downloads Gradle, the DXP dependencies, Node.js and the React app's npm packages (about 1 minute); later builds are faster.
 
 ## What gets deployed
 
@@ -55,7 +55,7 @@ The same build feeds both Liferay runtimes on EC2:
 ./gradlew clean dockerDeploy createDockerfile
 ```
 
-Workspace stages everything in `build/docker/` with a Dockerfile `FROM liferay/dxp:2026.q1.13-lts`.
+Workspace stages everything in `build/docker/` with a Dockerfile `FROM liferay/dxp:2026.q3.8` (the release in `gradle.properties`).
 
 > ⚠️ **Run `dockerDeploy` as well.** `createDockerfile` on its own stages only the configs: `build/docker/deploy` and `build/docker/client-extensions` stay empty.
 
@@ -94,6 +94,26 @@ liferay.workspace.node.package.manager=npm
 - **npm instead of yarn.** With the default yarn setup, a second root task (`:downloadNode`) downloads Node 20.12.2 over the Node 22 from the codename, and the build fails the same way. With npm, each client extension builds with Node 22.
 
 To work on the app with hot reload, run `npm install && npm run dev` in its folder and open <http://localhost:5173>. The `Liferay` global doesn't exist outside DXP there, so the account line fails; the rest of the UI works.
+
+## MCP server
+
+DXP 2026.Q3 can serve the **Model Context Protocol** at `/o/mcp`, so Claude and other AI clients can call Liferay's headless APIs as tools. It needs two settings, both in `configs/local` here, so a local bundle (`blade server init` / `blade server start`) has it on:
+
+| File | Setting |
+| --- | --- |
+| `configs/local/portal-ext.properties` | `feature.flag.LPD-63311=true` (a **beta** feature in 2026.Q3) |
+| `configs/local/osgi/configs/com.liferay.mcp.server.rest.internal.configuration.MCPServerConfiguration.config` | `enabled=B"true"` (without it, 2026.Q3 returns 404 at `/o/mcp`) |
+
+On EC2, the tutorial turns the same two settings on with `enable_mcp = true` (its default), and section 11.2 there shows how to connect Claude Code through an SSM tunnel. The workspace's `.claude/skills/mcp-server/SKILL.md` documents the 2026.Q3 server in detail: tool sets, data masking and authentication.
+
+Connect Claude Code to a local bundle:
+
+```bash
+export LIFERAY_MCP_BASIC=$(printf '%s' 'test@liferay.com:test' | base64 | tr -d '\n')
+claude mcp add --transport http liferay-local http://localhost:8080/o/mcp --header "Authorization: Basic ${LIFERAY_MCP_BASIC}"
+```
+
+`test` is the local bundle's default password; use your own if you changed it. The command stores the header as plain text in `~/.claude.json`.
 
 ## CI/CD with GitHub Actions
 
@@ -140,7 +160,7 @@ Until the AWS variables are set, the workflow still builds and checks everything
 
 ## Add your own code
 
-- **OSGi modules:** `blade create -t <template> -p <package> <name>` inside the workspace, or copy existing modules into `modules/`. 2026.Q1 uses **Jakarta** APIs (`jakarta.portlet.*`, `jakarta.servlet.*`), not `javax.*`.
+- **OSGi modules:** `blade create -t <template> -p <package> <name>` inside the workspace, or copy existing modules into `modules/`. DXP 2026 uses **Jakarta** APIs (`jakarta.portlet.*`, `jakarta.servlet.*`), not `javax.*`.
 - **Frontend and configuration client extensions** (CSS, JavaScript, custom elements, themes, OAuth settings and so on): add a folder under `client-extensions/` with a `client-extension.yaml`. They build into `.zip` files and deploy like modules. For another React app, copy `ec2-sample-react-app` and change the name everywhere it appears (folder, `client-extension.yaml` key, `htmlElementName`, `friendlyURLMapping`, the `renderBuiltUrl` path and `customElements.define`); two apps can't share an element name.
 - **Microservice client extensions** (Spring Boot, Node.js): these run as **their own processes**, not inside DXP. On EC2 they need their own container (for example another service in the tutorial's Compose file, or ECS), a route through the ALB, and an OAuth2 connection to DXP. Not covered yet.
 - **Version upgrades:** change `liferay.workspace.product` in `gradle.properties` and `liferay_version` in the tutorial's Terraform together, and follow Liferay's upgrade process.
@@ -151,6 +171,7 @@ Until the AWS variables are set, the workflow still builds and checks everything
 | --- | --- |
 | `./gradlew build` | ✅ Module jar and client extension zip built |
 | `./gradlew clean dockerDeploy createDockerfile` | ✅ Both artifacts staged in `build/docker/`; Dockerfile includes `LIFERAY_WORKSPACE_ENVIRONMENT=ec2` |
+| Build on `dxp-2026.q3.8` (23 October 2026) | ✅ `./gradlew clean build dockerDeploy createDockerfile` passes in 31 s; Dockerfile `FROM liferay/dxp:2026.q3.8`; the jar, both zips and the local MCP configuration are staged. MCP on a local bundle: 🔎 not yet started |
 | React client extension build (`./gradlew clean build dockerDeploy createDockerfile`) | ✅ Node 22.23.3, Vite 8.3.4: `main.js` 142 kB (46 kB gzipped) and `assets/index.css`; zip staged in `build/docker/client-extensions` with `baseURL` `/o/ec2-sample-react-app` and `cssURLs=assets/index.css` |
 | GitHub Actions with the React client extension | ✅ `build` passed in 53 s and `image` in 1 min 50 s ([run 39723266764](https://github.com/LGSAPAC/lfrgs-sh-aws-ec2-sample-workspace/actions/runs/39723266764)): Node 22.23.4 (the codename picks the latest Node 22 release, so CI may be a patch ahead of your machine), both client extension zips checked, `ec2-sample-react-app.zip` in the Tomcat archive and in the amd64 image at `/home/liferay/osgi/client-extensions` |
 | GitHub Actions `build` job | ✅ Passed in 1 min 20 s ([run 39708712711](https://github.com/LGSAPAC/lfrgs-sh-aws-ec2-sample-workspace/actions/runs/39708712711)): jar, zip and `Dockerfile.ext` checks; `liferay-artifacts-main-232a113.tar.gz` with `deploy/` (jar, zip) and `configs/` (`portal-workspace.properties`, `portal-setup-wizard.properties`) |
@@ -164,4 +185,4 @@ Until the AWS variables are set, the workflow still builds and checks everything
 | Deploy through SSM, Tomcat runtime, single instance | ✅ First deploy restarted Liferay once (new config files); the next one was a hot deploy with no restart, 11 seconds, all three bundles `STARTED` ([run 39876014417](https://github.com/LGSAPAC/lfrgs-sh-aws-ec2-sample-workspace/actions/runs/39876014417)). The portlet, the global CSS and the React app work on a page |
 | Sample portlet visible, CSS client extension applied, React widget renders in DXP | ✅ All three on a page, through the load balancer: the portlet's message, the orange top border, and the React app greeting the signed-in user from the headless API |
 
-`dxp-2026.q1.13-lts` was the latest **promoted** 2026.Q1 release in Liferay's release feed (<https://releases.liferay.com/releases.json>) on 22 October 2026.
+The tests above ran on `dxp-2026.q1.13-lts`, the latest **promoted** 2026.Q1 LTS release on 22 October 2026. On 23 October 2026 the workspace moved to `dxp-2026.q3.8`, the latest promoted release (GA 12 October 2026; not LTS): the local build passes, and its rows are below. List releases with `curl -s https://releases.liferay.com/releases.json | jq -r '.[] | select(.promoted=="true") | .releaseKey'`.
