@@ -251,5 +251,8 @@ jobs:
         run: |
           {
             echo "### Deployed \`${TAG}\` to stack \`${LIFERAY_STACK}\` (${LIFERAY_RUNTIME})"
-            [ "${LIFERAY_RUNTIME}" = "docker" ] && echo "Image: \`${IMAGE}\`"
+            # An if, not "[ ... ] && echo": that returns 1 for the tomcat runtime and fails the job.
+            if [ "${LIFERAY_RUNTIME}" = "docker" ]; then
+              echo "Image: \`${IMAGE}\`"
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
