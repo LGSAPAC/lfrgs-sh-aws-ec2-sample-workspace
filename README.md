@@ -4,6 +4,8 @@ A standard **Liferay Workspace for DXP 2026.Q3** (`dxp-2026.q3.8`) with three sa
 
 The step-by-step guide that creates the AWS side (EC2, ALB, RDS, EFS, ECR, the GitHub OIDC role) lives in [LGSAPAC/lfrgs-sh-aws-ec2-tutorial](https://github.com/LGSAPAC/lfrgs-sh-aws-ec2-tutorial), section 12.
 
+> ⚠️ **Unofficial documentation, for reference only.** This sample workspace and its README are not official Liferay documentation and is not supported by Liferay. It reflects one team's tests and may be incomplete or out of date. For official, supported guidance, see **[learn.liferay.com](https://learn.liferay.com)**, and check Liferay's [compatibility matrix](https://help.liferay.com/hc/en-us/articles/360049238151) before relying on any combination of versions here.
+
 > **Status:** Draft, October 2026. Tested on 22 October 2026: the workspace build (locally and in GitHub Actions), the `linux/amd64` image, the push to Amazon ECR through GitHub OIDC, and the deploy to a single EC2 instance (Docker runtime) through SSM, with the portlet and both client extensions deployed. The rolling deploy across two clustered nodes and the Tomcat runtime's deploy to a single instance are tested too (see [What was tested](#what-was-tested)).
 
 ## What's inside
