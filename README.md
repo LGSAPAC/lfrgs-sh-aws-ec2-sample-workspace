@@ -131,20 +131,22 @@ claude mcp add --transport http liferay-local http://localhost:8080/o/mcp --head
 
 ### Connect it to your AWS stack
 
-No AWS keys are stored in GitHub. After `terraform apply` in the tutorial, print the commands that set these repository **variables** (none is a secret):
+No AWS keys are stored in GitHub. After `terraform apply` in the tutorial, print the `gh` commands that set these repository secrets and variables:
 
 ```bash
-terraform -chdir=terraform output -raw github_variables_commands
+terraform -chdir=terraform output -raw github_settings_commands
 ```
 
-| Variable | Value (Terraform output) |
-| --- | --- |
-| `AWS_REGION` | Your region, for example `ap-southeast-1` |
-| `AWS_ROLE_ARN` | `github_actions_role_arn` |
-| `ECR_REPOSITORY` | `ecr_repository_url` |
-| `ARTIFACT_BUCKET` | `artifact_bucket` |
-| `LIFERAY_STACK` | `stack_name` |
-| `LIFERAY_RUNTIME` | `docker` or `tomcat`, the same as `liferay_runtime` in Terraform |
+| Kind | Name | Value (Terraform output) |
+| --- | --- | --- |
+| Secret | `AWS_ROLE_ARN` | `github_actions_role_arn` |
+| Secret | `ECR_REPOSITORY` | `ecr_repository_url` |
+| Secret | `ARTIFACT_BUCKET` | `artifact_bucket` |
+| Variable | `AWS_REGION` | Your region, for example `ap-northeast-1` |
+| Variable | `LIFERAY_STACK` | `stack_name` |
+| Variable | `LIFERAY_RUNTIME` | `docker` or `tomcat`, the same as `liferay_runtime` in Terraform |
+
+**Why secrets:** the role ARN, the ECR repository URI and the bucket name aren't credentials, but each contains your AWS account ID. GitHub masks **secrets** in workflow logs (`***`), never **variables**, and the logs of a public repository are public to anyone. The workflow also sets `mask-aws-account-id: true` on its AWS sign-in steps, so the account ID is hidden wherever else it appears.
 
 Then create the environment **`ec2`** under **Settings → Environments**, limited to the `main` branch and `v*` tags (the tutorial, section 12.2, has the CLI commands). **Required reviewers** (an approval before each deployment) need GitHub Team or Enterprise for a private repository; on GitHub Free GitHub refuses them. That's why deploys here are **on demand only**: a push to `main` builds and pushes the image, but nothing reaches the instances until someone with write access runs the workflow or pushes a `v*` tag. Commits whose message contains `[skip ci]` don't run the workflow at all.
 

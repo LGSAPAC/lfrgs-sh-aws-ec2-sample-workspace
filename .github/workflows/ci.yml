@@ -11,13 +11,19 @@
 # No AWS keys are stored in GitHub: the workflow assumes an IAM role through GitHub OIDC.
 # The tutorial's Terraform creates the role and prints every value below (terraform output).
 #
-# Repository variables (Settings > Secrets and variables > Actions > Variables):
-#   AWS_REGION        for example ap-southeast-1
+# Repository secrets (Settings > Secrets and variables > Actions > Secrets). They aren't
+# credentials, but each contains the AWS account ID, and GitHub masks secrets in logs (not
+# variables), which matters because the logs of a public repository are public:
 #   AWS_ROLE_ARN      IAM role GitHub Actions assumes (output github_actions_role_arn)
 #   ECR_REPOSITORY    ECR repository URI (output ecr_repository_url)
 #   ARTIFACT_BUCKET   S3 bucket for Tomcat artifacts (output artifact_bucket)
+#
+# Repository variables (Settings > Secrets and variables > Actions > Variables):
+#   AWS_REGION        for example ap-northeast-1
 #   LIFERAY_STACK     stack name the instances are tagged with (output stack_name)
 #   LIFERAY_RUNTIME   docker (default) or tomcat: how Liferay runs on the instances
+#
+# The tutorial's Terraform prints the gh commands that set all six (output github_settings_commands).
 #
 # The deploy job runs in the GitHub environment "ec2". On GitHub Team or Enterprise, add
 # required reviewers to it to approve each deployment (Settings > Environments > ec2).
@@ -44,7 +50,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  AWS_CONFIGURED: ${{ vars.AWS_REGION != '' && vars.AWS_ROLE_ARN != '' }}
+  AWS_CONFIGURED: ${{ vars.AWS_REGION != '' && secrets.AWS_ROLE_ARN != '' }}
 
 jobs:
   build:
@@ -126,7 +132,8 @@ jobs:
       contents: read
       id-token: write
     outputs:
-      image: ${{ steps.meta.outputs.image }}
+      # Not the image name: it contains the ECR_REPOSITORY secret, and GitHub drops job outputs
+      # that contain a secret. The deploy job builds the name again from the secret and the tag.
       pushed: ${{ steps.meta.outputs.push }}
     steps:
       - uses: actions/download-artifact@v8
@@ -139,7 +146,7 @@ jobs:
       - name: Work out the image name
         id: meta
         env:
-          ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+          ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
           TAG: ${{ needs.build.outputs.tag }}
         run: |
           if [ "${AWS_CONFIGURED}" = "true" ] && [ -n "${ECR_REPOSITORY}" ]; then
@@ -148,7 +155,7 @@ jobs:
           else
             IMAGE="dxp-custom:${TAG}"
             echo "push=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::AWS_REGION, AWS_ROLE_ARN or ECR_REPOSITORY not set: the image is built and checked but not pushed."
+            echo "::notice::AWS_REGION, or the AWS_ROLE_ARN or ECR_REPOSITORY secret, not set: the image is built and checked but not pushed."
           fi
           echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
           echo "Image: ${IMAGE}"
@@ -176,7 +183,9 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v6
         with:
           aws-region: ${{ vars.AWS_REGION }}
-          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          # Also hide the account ID wherever else it appears in later steps' output.
+          mask-aws-account-id: true
           role-session-name: gha-image-${{ github.run_id }}
 
       - name: Sign in to Amazon ECR
@@ -207,18 +216,18 @@ jobs:
     env:
       LIFERAY_STACK: ${{ vars.LIFERAY_STACK }}
       LIFERAY_RUNTIME: ${{ vars.LIFERAY_RUNTIME || 'docker' }}
-      ARTIFACT_BUCKET: ${{ vars.ARTIFACT_BUCKET }}
-      IMAGE: ${{ needs.image.outputs.image }}
+      ARTIFACT_BUCKET: ${{ secrets.ARTIFACT_BUCKET }}
+      IMAGE: ${{ secrets.ECR_REPOSITORY }}:${{ needs.build.outputs.tag }}
       TAG: ${{ needs.build.outputs.tag }}
     steps:
       - uses: actions/checkout@v7
 
       - name: Check the settings
         run: |
-          [ "${AWS_CONFIGURED}" = "true" ] || { echo "::error::Set AWS_REGION and AWS_ROLE_ARN to deploy"; exit 1; }
+          [ "${AWS_CONFIGURED}" = "true" ] || { echo "::error::Set the AWS_REGION variable and the AWS_ROLE_ARN secret to deploy"; exit 1; }
           case "${LIFERAY_RUNTIME}" in
-            docker) [ "${{ needs.image.outputs.pushed }}" = "true" ] || { echo "::error::The image was not pushed to ECR; set ECR_REPOSITORY"; exit 1; } ;;
-            tomcat) [ -n "${ARTIFACT_BUCKET}" ] || { echo "::error::Set ARTIFACT_BUCKET for the tomcat runtime"; exit 1; } ;;
+            docker) [ "${{ needs.image.outputs.pushed }}" = "true" ] || { echo "::error::The image was not pushed to ECR; set the ECR_REPOSITORY secret"; exit 1; } ;;
+            tomcat) [ -n "${ARTIFACT_BUCKET}" ] || { echo "::error::Set the ARTIFACT_BUCKET secret for the tomcat runtime"; exit 1; } ;;
             *) echo "::error::LIFERAY_RUNTIME must be docker or tomcat, not ${LIFERAY_RUNTIME}"; exit 1 ;;
           esac
 
@@ -226,7 +235,9 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v6
         with:
           aws-region: ${{ vars.AWS_REGION }}
-          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          # Also hide the account ID wherever else it appears in later steps' output.
+          mask-aws-account-id: true
           role-session-name: gha-deploy-${{ github.run_id }}
 
       - uses: actions/download-artifact@v8
